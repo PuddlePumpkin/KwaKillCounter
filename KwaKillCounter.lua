@@ -2,6 +2,14 @@ local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 
+local function GetCreatureRaceForGUID(destGUID)
+    if destGUID == UnitGUID("target") then
+        return UnitCreatureType("target") or "Unspecified"
+    end
+
+    return "Unspecified"
+end
+
 frame:SetScript("OnEvent", function(self, event, addOnName)
     if event == "ADDON_LOADED" and addOnName == "KwaKillCounter" then
         MyKillCountTable = MyKillCountTable or {}
@@ -9,7 +17,9 @@ frame:SetScript("OnEvent", function(self, event, addOnName)
         -- DATA MIGRATION
         for id, data in pairs(MyKillCountTable) do
             if type(data) == "number" then
-                MyKillCountTable[id] = {count = data, name = "Unknown (ID: "..id..")"}
+                MyKillCountTable[id] = {count = data, name = "Unknown (ID: "..id..")", race = "Unspecified"}
+            elseif type(data) == "table" and not data.race then
+                data.race = "Unspecified"
             end
         end
     elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
@@ -17,19 +27,23 @@ frame:SetScript("OnEvent", function(self, event, addOnName)
         if subevent == "UNIT_DIED" and destGUID and destName then
             local unitType, _, _, _, _, npcID = strsplit("-", destGUID)
             if (unitType == "Creature" or unitType == "Vehicle") and npcID then
-                -- Initialize table if it doesn't exist
-                MyKillCountTable[npcID] = MyKillCountTable[npcID] or {count = 0, name = destName}
-                
-                -- Migration: If the existing data is just a number, move it into the table
-                if type(MyKillCountTable[npcID]) == "number" then
-                    local oldCount = MyKillCountTable[npcID]
-                    MyKillCountTable[npcID] = {count = oldCount, name = destName}
+                local race = GetCreatureRaceForGUID(destGUID, destName)
+                local entry = MyKillCountTable[npcID]
+
+                if type(entry) == "number" then
+                    entry = {count = entry, name = destName, race = race}
                 end
-                
-                -- Increment
-                MyKillCountTable[npcID].count = MyKillCountTable[npcID].count + 1
-                -- Update name in case it was recorded as "Unknown" previously
-                MyKillCountTable[npcID].name = destName
+
+                if type(entry) ~= "table" then
+                    entry = {count = 0, name = destName, race = race}
+                end
+
+                entry.count = (entry.count or 0) + 1
+                entry.name = destName
+                if not entry.race or entry.race == "Unspecified" then
+                    entry.race = race
+                end
+                MyKillCountTable[npcID] = entry
             end
         end
     end
@@ -53,6 +67,7 @@ local function ShowTopKills()
         return a.count > b.count
     end)
 
+    print(".")
     print("|cffffff00Total Kills Across All Mobs:|r " .. totalKills)
     print("----------------------------")
     print("|cff00ff00Top 5 Most Killed:|r")
@@ -68,8 +83,46 @@ local function ShowTopKills()
     end
 end
 
--- Register Slash Command
+-- Function to sort and display top races
+local function ShowTopRaces()
+    local tempTable = {}
+    local raceTotals = {}
+
+    for id, data in pairs(MyKillCountTable) do
+        if type(data) == "table" and data.race and data.race ~= "Unspecified" then
+            raceTotals[data.race] = (raceTotals[data.race] or 0) + (data.count or 0)
+        end
+    end
+
+    for race, count in pairs(raceTotals) do
+        table.insert(tempTable, {race = race, count = count})
+    end
+
+    -- Sort: Highest count first
+    table.sort(tempTable, function(a, b)
+        return a.count > b.count
+    end)
+
+    print(".")
+    print("|cffffff00Total kills by race|r")
+    print("----------------------------")
+    
+    for _, data in ipairs(tempTable) do
+        print(data.race .. ": " .. data.count)
+    end
+    
+    if #tempTable == 0 then
+        print("No race kills recorded yet!")
+    end
+end
+
+-- Register Slash Commands
 SLASH_KWAKILLS1 = "/kwakills"
 SlashCmdList["KWAKILLS"] = function()
     ShowTopKills()
+end
+
+SLASH_KWARACEKILLS1 = "/kwaracekills"
+SlashCmdList["KWARACEKILLS"] = function()
+    ShowTopRaces()
 end
