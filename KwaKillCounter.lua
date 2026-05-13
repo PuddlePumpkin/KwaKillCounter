@@ -2,10 +2,76 @@ local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 frame:RegisterEvent("CHAT_MSG_COMBAT_XP_GAIN")
+frame:RegisterEvent("LOOT_OPENED")
+frame:RegisterEvent("LOOT_READY")
+frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 
 local pendingKillQueue = {}
+local processedGUIDs = {}
 -- Pattern to capture: "MobName dies, you gain %d experience."
 local xpKillPattern = _G["COMBATLOG_XPGAIN_FIRSTPERSON"]:gsub("%%s", ".-"):gsub("%%d", "(%%d+)")
+
+local function UpdateLootValue()
+    local numItems = GetNumLootItems()
+    if numItems == 0 then return end
+
+    local lootValues = {} -- guid -> { total = 0, complete = true }
+    
+    for i = 1, numItems do
+        local guid = GetLootSourceInfo(i)
+        -- Fallback to target if GetLootSourceInfo is nil (common in some Classic versions)
+        if not guid then
+            local targetGUID = UnitGUID("target")
+            if targetGUID and UnitIsDead("target") then
+                guid = targetGUID
+            end
+        end
+
+        if guid and not processedGUIDs[guid] then
+            if not lootValues[guid] then
+                lootValues[guid] = { total = 0, complete = true }
+            end
+            
+            local slotType = GetLootSlotType(i)
+            if slotType == 1 then -- Item
+                local itemLink = GetLootSlotLink(i)
+                if itemLink then
+                    local price = select(11, GetItemInfo(itemLink))
+                    if price then
+                        local _, _, quantity = GetLootSlotInfo(i)
+                        lootValues[guid].total = lootValues[guid].total + (price * (quantity or 1))
+                    else
+                        -- Item info not in cache yet
+                        lootValues[guid].complete = false
+                    end
+                else
+                    lootValues[guid].complete = false
+                end
+            elseif slotType == 2 then -- Money
+                local _, _, quantity = GetLootSlotInfo(i)
+                lootValues[guid].total = lootValues[guid].total + (quantity or 0)
+            end
+        end
+    end
+    
+    for guid, data in pairs(lootValues) do
+        if data.complete then
+            processedGUIDs[guid] = true
+            local unitType, _, _, _, _, npcID = strsplit("-", guid)
+            if (unitType == "Creature" or unitType == "Vehicle") and npcID then
+                if MyKillCountTable[npcID] then
+                    local entry = MyKillCountTable[npcID]
+                    local totalValue = data.total
+                    if entry.avgLootValue and entry.avgLootValue > 0 then
+                        entry.avgLootValue = (entry.avgLootValue + totalValue) / 2
+                    else
+                        entry.avgLootValue = totalValue
+                    end
+                end
+            end
+        end
+    end
+end
 
 frame:SetScript("OnEvent", function(self, event, ...)
     if event == "ADDON_LOADED" then
@@ -14,6 +80,9 @@ frame:SetScript("OnEvent", function(self, event, ...)
             MyKillCountTable = MyKillCountTable or {}
         end
     
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        processedGUIDs = {}
+
     elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
         local _, subevent, _, _, _, _, _, destGUID, destName = CombatLogGetCurrentEventInfo()
         
@@ -31,7 +100,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
 
                 -- Table Initialization
                 if not MyKillCountTable[npcID] then
-                    MyKillCountTable[npcID] = {count = 0, name = destName, race = race, xp = 0}
+                    MyKillCountTable[npcID] = {count = 0, name = destName, race = race, xp = 0, avgLootValue = 0}
                 end
                 
                 local entry = MyKillCountTable[npcID]
@@ -67,6 +136,9 @@ frame:SetScript("OnEvent", function(self, event, ...)
                 end
             end
         end
+
+    elseif event == "LOOT_OPENED" or event == "LOOT_READY" then
+        UpdateLootValue()
     end
 end)
 
@@ -76,7 +148,7 @@ local function ShowTopKills()
     
     for id, data in pairs(MyKillCountTable) do
         if type(data) == "table" then
-            table.insert(tempTable, {name = data.name, count = data.count, xp = data.xp})
+            table.insert(tempTable, {name = data.name, count = data.count, xp = data.xp, avgLootValue = data.avgLootValue})
             totalKills = totalKills + (data.count or 0)
         end
     end
@@ -91,7 +163,11 @@ local function ShowTopKills()
     for i = 1, 5 do
         if tempTable[i] then
             local mob = tempTable[i]
-            print(i .. ". " .. mob.name .. " (" .. mob.count .. ")")
+            local lootText = ""
+            if mob.avgLootValue and mob.avgLootValue > 0 then
+                lootText = " | Avg Loot: " .. GetCoinTextureString(math.floor(mob.avgLootValue))
+            end
+            print(i .. ". " .. mob.name .. " (" .. mob.count .. ")" .. lootText)
         else
             if i == 1 and totalKills == 0 then print("No kills recorded yet!") end
             break
