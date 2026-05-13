@@ -236,8 +236,75 @@ local function ShowTopRaces()
     end
 end
 
+local function FindItemSource(msg)
+    if not msg or msg == "" then
+        print("|cffff0000Usage: /kwafind [Item Link] OR /kwafind Item Name|r")
+        return
+    end
+
+    local itemID = msg:match("item:(%d+)")
+    local itemNameFromLink = msg:match("%[(.+)%]")
+    
+    local searchKey = itemID or msg:lower()
+    local displayItemName = itemNameFromLink or msg
+
+    if itemID then
+        local name = GetItemInfo(itemID)
+        if name then displayItemName = name end
+    end
+
+    local foundSources = {}
+
+    for id, data in pairs(MyKillCountTable) do
+        if type(data) == "table" and data.items then
+            for _, item in ipairs(data.items) do
+                local match = false
+                if itemID then
+                    -- Search by ID
+                    if item == itemID then
+                        match = true
+                    end
+                else
+                    -- Search by Name (case-insensitive)
+                    if type(item) == "string" then
+                        -- If stored as name, check directly
+                        if item:lower() == searchKey then
+                            match = true
+                        else
+                            -- If stored as ID, try to get name for comparison
+                            local storedName = GetItemInfo(item)
+                            if storedName and storedName:lower() == searchKey then
+                                match = true
+                            end
+                        end
+                    end
+                end
+
+                if match then
+                    table.insert(foundSources, data.name or ("NPC " .. id))
+                    break
+                end
+            end
+        end
+    end
+
+    print("----------------------------")
+    print("|cffffff00Sources for:|r " .. displayItemName)
+    print("----------------------------")
+    if #foundSources > 0 then
+        for _, name in ipairs(foundSources) do
+            print("- " .. name)
+        end
+    else
+        print("No recorded drops for this item yet.")
+    end
+end
+
 SLASH_KWAKILLS1 = "/kwakills"
 SlashCmdList["KWAKILLS"] = ShowTopKills
 
 SLASH_KWARACEKILLS1 = "/kwaracekills"
 SlashCmdList["KWARACEKILLS"] = ShowTopRaces
+
+SLASH_KWAFIND1 = "/kwafind"
+SlashCmdList["KWAFIND"] = FindItemSource
