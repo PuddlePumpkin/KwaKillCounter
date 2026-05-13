@@ -1,6 +1,9 @@
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+frame:RegisterEvent("CHAT_MSG_COMBAT_XP_GAIN")
+
+local pendingKillQueue = {}
 
 local function GetCreatureRaceForGUID(destGUID)
     if destGUID == UnitGUID("target") then
@@ -10,40 +13,62 @@ local function GetCreatureRaceForGUID(destGUID)
     return "Unspecified"
 end
 
-frame:SetScript("OnEvent", function(self, event, addOnName)
-    if event == "ADDON_LOADED" and addOnName == "KwaKillCounter" then
-        MyKillCountTable = MyKillCountTable or {}
-        
-        -- DATA MIGRATION
-        for id, data in pairs(MyKillCountTable) do
-            if type(data) == "number" then
-                MyKillCountTable[id] = {count = data, name = "Unknown (ID: "..id..")", race = "Unspecified"}
-            elseif type(data) == "table" and not data.race then
-                data.race = "Unspecified"
-            end
+frame:SetScript("OnEvent", function(self, event, ...)
+    if event == "ADDON_LOADED" then
+        local addOnName = ...
+        if addOnName == "KwaKillCounter" then
+            MyKillCountTable = MyKillCountTable or {}
         end
+    
     elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
-        local timestamp, subevent, hideCaster, sourceGUID, sourceName, sourceFlags, sourceRaidFlags, destGUID, destName, destFlags, destRaidFlags = CombatLogGetCurrentEventInfo()
-        if subevent == "UNIT_DIED" and destGUID and destName then
+        local _, subevent, _, _, _, _, _, destGUID, destName = CombatLogGetCurrentEventInfo()
+        
+        if subevent == "UNIT_DIED" then
             local unitType, _, _, _, _, npcID = strsplit("-", destGUID)
             if (unitType == "Creature" or unitType == "Vehicle") and npcID then
-                local race = GetCreatureRaceForGUID(destGUID, destName)
+                
+                -- 1. Get Race while the unit might still be valid
+                local race = "Unspecified"
+                if destGUID == UnitGUID("target") then
+                    race = UnitCreatureType("target") or "Unspecified"
+                elseif destGUID == UnitGUID("mouseover") then
+                    race = UnitCreatureType("mouseover") or "Unspecified"
+                end
+
+                -- 2. Ensure Table Entry exists
+                if not MyKillCountTable[npcID] then
+                    MyKillCountTable[npcID] = {count = 0, name = destName, race = race}
+                end
+                
                 local entry = MyKillCountTable[npcID]
-
-                if type(entry) == "number" then
-                    entry = {count = entry, name = destName, race = race}
-                end
-
-                if type(entry) ~= "table" then
-                    entry = {count = 0, name = destName, race = race}
-                end
-
-                entry.count = (entry.count or 0) + 1
+                entry.count = entry.count + 1
                 entry.name = destName
-                if not entry.race or entry.race == "Unspecified" then
-                    entry.race = race
+                
+                -- Update race if we managed to find it this time
+                if race ~= "Unspecified" then entry.race = race end
+
+                -- 3. Add to queue for XP processing
+                table.insert(pendingKillQueue, npcID)
+                
+                -- Prevent queue from bloating if XP isn't earned (e.g. gray mobs)
+                -- If the queue gets too long, we clear the oldest entry
+                if #pendingKillQueue > 10 then
+                    table.remove(pendingKillQueue, 1)
                 end
-                MyKillCountTable[npcID] = entry
+            end
+        end
+
+    elseif event == "CHAT_MSG_COMBAT_XP_GAIN" then
+        local message = ...
+        -- Improved regex to find numbers in localized strings
+        local xp = tonumber(message:match("(%d+)"))
+        
+        if xp and #pendingKillQueue > 0 then
+            -- Grab the most recent death (back of the queue) 
+            -- or oldest (front). Usually, XP fires immediately after death.
+            local npcID = table.remove(pendingKillQueue, 1)
+            if MyKillCountTable[npcID] then
+                MyKillCountTable[npcID].xp = xp
             end
         end
     end
