@@ -1,14 +1,35 @@
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
+frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 
 frame:SetScript("OnEvent", function(self, event, addOnName)
-    if addOnName == "KwaKillCounter" then
+    if event == "ADDON_LOADED" and addOnName == "KwaKillCounter" then
         MyKillCountTable = MyKillCountTable or {}
         
         -- DATA MIGRATION
         for id, data in pairs(MyKillCountTable) do
             if type(data) == "number" then
                 MyKillCountTable[id] = {count = data, name = "Unknown (ID: "..id..")"}
+            end
+        end
+    elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
+        local timestamp, subevent, hideCaster, sourceGUID, sourceName, sourceFlags, sourceRaidFlags, destGUID, destName, destFlags, destRaidFlags = CombatLogGetCurrentEventInfo()
+        if subevent == "UNIT_DIED" and destGUID and destName then
+            local unitType, _, _, _, _, npcID = strsplit("-", destGUID)
+            if (unitType == "Creature" or unitType == "Vehicle") and npcID then
+                -- Initialize table if it doesn't exist
+                MyKillCountTable[npcID] = MyKillCountTable[npcID] or {count = 0, name = destName}
+                
+                -- Migration: If the existing data is just a number, move it into the table
+                if type(MyKillCountTable[npcID]) == "number" then
+                    local oldCount = MyKillCountTable[npcID]
+                    MyKillCountTable[npcID] = {count = oldCount, name = destName}
+                end
+                
+                -- Increment
+                MyKillCountTable[npcID].count = MyKillCountTable[npcID].count + 1
+                -- Update name in case it was recorded as "Unknown" previously
+                MyKillCountTable[npcID].name = destName
             end
         end
     end
