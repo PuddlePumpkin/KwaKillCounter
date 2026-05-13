@@ -8,4 +8,4 @@ copy "%~dp0KwaKillCounter.lua" "%DEST_DIR%\"
 copy "%~dp0KwaKillCounter.toc" "%DEST_DIR%\"
 
 echo Files copied successfully to %DEST_DIR%
-sleep 2
+timeout /t 3

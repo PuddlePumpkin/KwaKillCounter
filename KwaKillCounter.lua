@@ -4,14 +4,8 @@ frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 frame:RegisterEvent("CHAT_MSG_COMBAT_XP_GAIN")
 
 local pendingKillQueue = {}
-
-local function GetCreatureRaceForGUID(destGUID)
-    if destGUID == UnitGUID("target") then
-        return UnitCreatureType("target") or "Unspecified"
-    end
-
-    return "Unspecified"
-end
+-- Pattern to capture: "MobName dies, you gain %d experience."
+local xpKillPattern = _G["COMBATLOG_XPGAIN_FIRSTPERSON"]:gsub("%%s", ".-"):gsub("%%d", "(%%d+)")
 
 frame:SetScript("OnEvent", function(self, event, ...)
     if event == "ADDON_LOADED" then
@@ -27,7 +21,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
             local unitType, _, _, _, _, npcID = strsplit("-", destGUID)
             if (unitType == "Creature" or unitType == "Vehicle") and npcID then
                 
-                -- 1. Get Race while the unit might still be valid
+                -- Race detection
                 local race = "Unspecified"
                 if destGUID == UnitGUID("target") then
                     race = UnitCreatureType("target") or "Unspecified"
@@ -35,65 +29,62 @@ frame:SetScript("OnEvent", function(self, event, ...)
                     race = UnitCreatureType("mouseover") or "Unspecified"
                 end
 
-                -- 2. Ensure Table Entry exists
+                -- Table Initialization
                 if not MyKillCountTable[npcID] then
-                    MyKillCountTable[npcID] = {count = 0, name = destName, race = race}
+                    MyKillCountTable[npcID] = {count = 0, name = destName, race = race, xp = 0}
                 end
                 
                 local entry = MyKillCountTable[npcID]
-                entry.count = entry.count + 1
+                entry.count = (entry.count or 0) + 1
                 entry.name = destName
-                
-                -- Update race if we managed to find it this time
                 if race ~= "Unspecified" then entry.race = race end
 
-                -- 3. Add to queue for XP processing
-                table.insert(pendingKillQueue, npcID)
+                -- Queue for XP matching (expires in 2 seconds)
+                table.insert(pendingKillQueue, { id = npcID, time = GetTime() })
                 
-                -- Prevent queue from bloating if XP isn't earned (e.g. gray mobs)
-                -- If the queue gets too long, we clear the oldest entry
-                if #pendingKillQueue > 10 then
-                    table.remove(pendingKillQueue, 1)
-                end
+                -- Keep queue lean
+                if #pendingKillQueue > 10 then table.remove(pendingKillQueue, 1) end
             end
         end
 
     elseif event == "CHAT_MSG_COMBAT_XP_GAIN" then
         local message = ...
-        -- Improved regex to find numbers in localized strings
-        local xp = tonumber(message:match("(%d+)"))
+        local xpString = message:match(xpKillPattern)
         
-        if xp and #pendingKillQueue > 0 then
-            -- Grab the most recent death (back of the queue) 
-            -- or oldest (front). Usually, XP fires immediately after death.
-            local npcID = table.remove(pendingKillQueue, 1)
-            if MyKillCountTable[npcID] then
-                MyKillCountTable[npcID].xp = xp
+        if xpString then
+            local xp = tonumber(xpString)
+            local now = GetTime()
+            
+            -- Find the first mob in queue that died within the last 2 seconds
+            for i, data in ipairs(pendingKillQueue) do
+                if (now - data.time) < 2.0 then
+                    local npcID = data.id
+                    if MyKillCountTable[npcID] then
+                        MyKillCountTable[npcID].xp = xp -- Update to most recent XP
+                    end
+                    table.remove(pendingKillQueue, i)
+                    break
+                end
             end
         end
     end
 end)
 
--- Function to sort and display top 5 + Total
 local function ShowTopKills()
     local tempTable = {}
     local totalKills = 0
     
     for id, data in pairs(MyKillCountTable) do
         if type(data) == "table" then
-            table.insert(tempTable, {name = data.name, count = data.count})
-            -- Add to the running total
+            table.insert(tempTable, {name = data.name, count = data.count, xp = data.xp})
             totalKills = totalKills + (data.count or 0)
         end
     end
 
-    -- Sort: Highest count first
-    table.sort(tempTable, function(a, b)
-        return a.count > b.count
-    end)
+    table.sort(tempTable, function(a, b) return a.count > b.count end)
 
-    print(".")
-    print("|cffffff00Total Kills Across All Mobs:|r " .. totalKills)
+    print("----------------------------")
+    print("|cffffff00Total Kills:|r " .. totalKills)
     print("----------------------------")
     print("|cff00ff00Top 5 Most Killed:|r")
     
@@ -108,7 +99,6 @@ local function ShowTopKills()
     end
 end
 
--- Function to sort and display top races
 local function ShowTopRaces()
     local tempTable = {}
     local raceTotals = {}
@@ -123,31 +113,18 @@ local function ShowTopRaces()
         table.insert(tempTable, {race = race, count = count})
     end
 
-    -- Sort: Highest count first
-    table.sort(tempTable, function(a, b)
-        return a.count > b.count
-    end)
+    table.sort(tempTable, function(a, b) return a.count > b.count end)
 
-    print(".")
-    print("|cffffff00Total kills by race|r")
     print("----------------------------")
-    
+    print("|cffffff00Kills by Race:|r")
+    print("----------------------------")
     for _, data in ipairs(tempTable) do
-        print(data.race .. ": " .. data.count)
-    end
-    
-    if #tempTable == 0 then
-        print("No race kills recorded yet!")
+        print("- " .. data.race .. ": " .. data.count)
     end
 end
 
--- Register Slash Commands
 SLASH_KWAKILLS1 = "/kwakills"
-SlashCmdList["KWAKILLS"] = function()
-    ShowTopKills()
-end
+SlashCmdList["KWAKILLS"] = ShowTopKills
 
 SLASH_KWARACEKILLS1 = "/kwaracekills"
-SlashCmdList["KWARACEKILLS"] = function()
-    ShowTopRaces()
-end
+SlashCmdList["KWARACEKILLS"] = ShowTopRaces
