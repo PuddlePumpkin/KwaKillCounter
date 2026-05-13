@@ -1,0 +1,5 @@
+## Interface: 11502
+## Title: KwaKillCounter
+## SavedVariables: MyKillCountTable
+
+KwaKillCounter.lua
