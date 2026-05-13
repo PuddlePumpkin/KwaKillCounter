@@ -15,11 +15,10 @@ local function UpdateLootValue()
     local numItems = GetNumLootItems()
     if numItems == 0 then return end
 
-    local lootValues = {} -- guid -> { total = 0, complete = true }
+    local lootData = {} -- guid -> { totalMoney = 0, items = {}, complete = true }
     
     for i = 1, numItems do
         local guid = GetLootSourceInfo(i)
-        -- Fallback to target if GetLootSourceInfo is nil (common in some Classic versions)
         if not guid then
             local targetGUID = UnitGUID("target")
             if targetGUID and UnitIsDead("target") then
@@ -28,40 +27,67 @@ local function UpdateLootValue()
         end
 
         if guid and not processedGUIDs[guid] then
-            if not lootValues[guid] then
-                lootValues[guid] = { total = 0, complete = true }
+            if not lootData[guid] then
+                lootData[guid] = { totalMoney = 0, items = {}, complete = true }
             end
             
             local slotType = GetLootSlotType(i)
             if slotType == 1 then -- Item
                 local itemLink = GetLootSlotLink(i)
                 if itemLink then
-                    local price = select(11, GetItemInfo(itemLink))
-                    if price then
-                        local _, _, quantity = GetLootSlotInfo(i)
-                        lootValues[guid].total = lootValues[guid].total + (price * (quantity or 1))
+                    local itemName, _, _, _, _, _, _, _, _, _, price = GetItemInfo(itemLink)
+                    
+                    -- Record item even if price is missing (we'll just mark it incomplete for average value)
+                    if itemName then
+                        if not itemName:lower():find(" of the ") then
+                            local itemID = itemLink:match("item:(%d+)")
+                            table.insert(lootData[guid].items, itemID or itemName)
+                        end
+                        
+                        if price then
+                            local _, _, quantity = GetLootSlotInfo(i)
+                            lootData[guid].totalMoney = lootData[guid].totalMoney + (price * (quantity or 1))
+                        else
+                            lootData[guid].complete = false
+                        end
                     else
-                        -- Item info not in cache yet
-                        lootValues[guid].complete = false
+                        lootData[guid].complete = false
                     end
                 else
-                    lootValues[guid].complete = false
+                    lootData[guid].complete = false
                 end
             elseif slotType == 2 then -- Money
                 local _, _, quantity = GetLootSlotInfo(i)
-                lootValues[guid].total = lootValues[guid].total + (quantity or 0)
+                lootData[guid].totalMoney = lootData[guid].totalMoney + (quantity or 0)
             end
         end
     end
     
-    for guid, data in pairs(lootValues) do
-        if data.complete then
-            processedGUIDs[guid] = true
-            local unitType, _, _, _, _, npcID = strsplit("-", guid)
-            if (unitType == "Creature" or unitType == "Vehicle") and npcID then
-                if MyKillCountTable[npcID] then
-                    local entry = MyKillCountTable[npcID]
-                    local totalValue = data.total
+    for guid, data in pairs(lootData) do
+        local unitType, _, _, _, _, npcID = strsplit("-", guid)
+        if (unitType == "Creature" or unitType == "Vehicle") and npcID then
+            if MyKillCountTable[npcID] then
+                local entry = MyKillCountTable[npcID]
+                entry.items = entry.items or {}
+                
+                -- Always update items if we found any
+                for _, newItem in ipairs(data.items) do
+                    local exists = false
+                    for _, existingItem in ipairs(entry.items) do
+                        if existingItem == newItem then
+                            exists = true
+                            break
+                        end
+                    end
+                    if not exists then
+                        table.insert(entry.items, newItem)
+                    end
+                end
+
+                -- Only update average value if we have all prices for this window
+                if data.complete then
+                    processedGUIDs[guid] = true
+                    local totalValue = data.totalMoney
                     if entry.avgLootValue and entry.avgLootValue > 0 then
                         entry.avgLootValue = (entry.avgLootValue + totalValue) / 2
                     else
@@ -78,6 +104,15 @@ frame:SetScript("OnEvent", function(self, event, ...)
         local addOnName = ...
         if addOnName == "KwaKillCounter" then
             MyKillCountTable = MyKillCountTable or {}
+            
+            -- Migration: Ensure all existing entries have proper fields
+            for id, data in pairs(MyKillCountTable) do
+                if type(data) == "table" then
+                    data.items = data.items or {}
+                    data.avgLootValue = data.avgLootValue or 0
+                    data.xp = data.xp or 0
+                end
+            end
         end
     
     elseif event == "PLAYER_ENTERING_WORLD" then
@@ -100,13 +135,15 @@ frame:SetScript("OnEvent", function(self, event, ...)
 
                 -- Table Initialization
                 if not MyKillCountTable[npcID] then
-                    MyKillCountTable[npcID] = {count = 0, name = destName, race = race, xp = 0, avgLootValue = 0}
+                    MyKillCountTable[npcID] = {count = 0, name = destName, race = race, xp = 0, avgLootValue = 0, items = {}}
                 end
                 
                 local entry = MyKillCountTable[npcID]
+                entry.items = entry.items or {}
                 entry.count = (entry.count or 0) + 1
                 entry.name = destName
                 if race ~= "Unspecified" then entry.race = race end
+                if not entry.avgLootValue then entry.avgLootValue = 0 end
 
                 -- Queue for XP matching (expires in 2 seconds)
                 table.insert(pendingKillQueue, { id = npcID, time = GetTime() })
