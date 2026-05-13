@@ -308,3 +308,38 @@ SlashCmdList["KWARACEKILLS"] = ShowTopRaces
 
 SLASH_KWAFIND1 = "/kwafind"
 SlashCmdList["KWAFIND"] = FindItemSource
+
+-- Tooltip Integration
+GameTooltip:HookScript("OnTooltipSetItem", function(self)
+    if not IsShiftKeyDown() then return end
+
+    local _, link = self:GetItem()
+    if not link then return end
+
+    local itemID = link:match("item:(%d+)")
+    if not itemID then return end
+
+    local sources = {}
+    for id, data in pairs(MyKillCountTable) do
+        if type(data) == "table" and data.items then
+            for _, item in ipairs(data.items) do
+                if item == itemID then
+                    table.insert(sources, data.name or ("NPC " .. id))
+                    break
+                end
+            end
+        end
+    end
+
+    if #sources > 0 then
+        self:AddLine(" ") -- Spacer
+        self:AddLine("|cffffff00Dropped by:|r")
+        for i = 1, math.min(3, #sources) do
+            self:AddLine("- " .. sources[i])
+        end
+        if #sources > 3 then
+            self:AddLine("...")
+        end
+        self:Show()
+    end
+end)
