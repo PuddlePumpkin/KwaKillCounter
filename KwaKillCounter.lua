@@ -14,52 +14,58 @@ local xpKillPattern = _G["COMBATLOG_XPGAIN_FIRSTPERSON"]:gsub("%%s", ".-"):gsub(
 
 local function UpdateLootValue()
     local numItems = GetNumLootItems()
-    if numItems == 0 then return end
-
     local lootData = {} -- guid -> { totalMoney = 0, items = {}, complete = true }
-    
-    for i = 1, numItems do
-        local guid = GetLootSourceInfo(i)
-        if not guid then
-            local targetGUID = UnitGUID("target")
-            if targetGUID and UnitIsDead("target") then
-                guid = targetGUID
-            end
-        end
 
-        if guid and (not processedGUIDs[guid] or not processedItemGUIDs[guid]) then
-            if not lootData[guid] then
-                lootData[guid] = { totalMoney = 0, items = {}, complete = true }
+    if numItems == 0 then
+        -- Even if empty, we want to count the loot event for the current target
+        local targetGUID = UnitGUID("target")
+        if targetGUID and UnitIsDead("target") then
+            lootData[targetGUID] = { totalMoney = 0, items = {}, complete = true }
+        end
+    else
+        for i = 1, numItems do
+            local guid = GetLootSourceInfo(i)
+            if not guid then
+                local targetGUID = UnitGUID("target")
+                if targetGUID and UnitIsDead("target") then
+                    guid = targetGUID
+                end
             end
-            
-            local slotType = GetLootSlotType(i)
-            if slotType == 1 then -- Item
-                local itemLink = GetLootSlotLink(i)
-                if itemLink then
-                    local itemName, _, _, _, _, _, _, _, _, _, price = GetItemInfo(itemLink)
-                    
-                    -- Record item even if price is missing (we'll just mark it incomplete for average value)
-                    if itemName then
-                        if not itemName:lower():find(" of the ") then
-                            local itemID = itemLink:match("item:(%d+)")
-                            table.insert(lootData[guid].items, itemID or itemName)
-                        end
+
+            if guid and (not processedGUIDs[guid] or not processedItemGUIDs[guid]) then
+                if not lootData[guid] then
+                    lootData[guid] = { totalMoney = 0, items = {}, complete = true }
+                end
+                
+                local slotType = GetLootSlotType(i)
+                if slotType == 1 then -- Item
+                    local itemLink = GetLootSlotLink(i)
+                    if itemLink then
+                        local itemName, _, _, _, _, _, _, _, _, _, price = GetItemInfo(itemLink)
                         
-                        if price then
-                            local _, _, quantity = GetLootSlotInfo(i)
-                            lootData[guid].totalMoney = lootData[guid].totalMoney + (price * (quantity or 1))
+                        -- Record item even if price is missing (we'll just mark it incomplete for average value)
+                        if itemName then
+                            if not itemName:lower():find(" of the ") then
+                                local itemID = itemLink:match("item:(%d+)")
+                                table.insert(lootData[guid].items, itemID or itemName)
+                            end
+                            
+                            if price then
+                                local _, _, quantity = GetLootSlotInfo(i)
+                                lootData[guid].totalMoney = lootData[guid].totalMoney + (price * (quantity or 1))
+                            else
+                                lootData[guid].complete = false
+                            end
                         else
                             lootData[guid].complete = false
                         end
                     else
                         lootData[guid].complete = false
                     end
-                else
-                    lootData[guid].complete = false
+                elseif slotType == 2 then -- Money
+                    local _, _, quantity = GetLootSlotInfo(i)
+                    lootData[guid].totalMoney = lootData[guid].totalMoney + (quantity or 0)
                 end
-            elseif slotType == 2 then -- Money
-                local _, _, quantity = GetLootSlotInfo(i)
-                lootData[guid].totalMoney = lootData[guid].totalMoney + (quantity or 0)
             end
         end
     end
@@ -74,6 +80,7 @@ local function UpdateLootValue()
                 -- Always update item counts if we haven't for this GUID
                 if not processedItemGUIDs[guid] then
                     processedItemGUIDs[guid] = true
+                    entry.looted = (entry.looted or 0) + 1
                     
                     -- Use a local set to only count each unique item once per loot window
                     local uniqueItems = {}
@@ -122,6 +129,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
                     data.items = data.items or {}
                     data.avgLootValue = data.avgLootValue or 0
                     data.xp = data.xp or 0
+                    data.looted = data.looted or 0
                 end
             end
         end
@@ -147,12 +155,13 @@ frame:SetScript("OnEvent", function(self, event, ...)
 
                 -- Table Initialization
                 if not MyKillCountTable[npcID] then
-                    MyKillCountTable[npcID] = {count = 0, name = destName, race = race, xp = 0, avgLootValue = 0, items = {}}
+                    MyKillCountTable[npcID] = {count = 0, looted = 0, name = destName, race = race, xp = 0, avgLootValue = 0, items = {}}
                 end
                 
                 local entry = MyKillCountTable[npcID]
                 entry.items = entry.items or {}
                 entry.count = (entry.count or 0) + 1
+                entry.looted = entry.looted or 0
                 entry.name = destName
                 if race ~= "Unspecified" then entry.race = race end
                 if not entry.avgLootValue then entry.avgLootValue = 0 end
@@ -294,8 +303,9 @@ local function FindItemSource(msg)
 
                 if match then
                     local rate = 0
-                    if data.count and data.count > 0 then
-                        rate = (dropCount / data.count) * 100
+                    local totalSamples = data.looted or data.count or 0
+                    if totalSamples > 0 then
+                        rate = (dropCount / totalSamples) * 100
                     end
                     table.insert(foundSources, {name = data.name or ("NPC " .. id), rate = rate})
                     break
@@ -342,8 +352,9 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
             for item, dropCount in pairs(data.items) do
                 if tostring(item) == itemID then
                     local rate = 0
-                    if data.count and data.count > 0 then
-                        rate = (dropCount / data.count) * 100
+                    local totalSamples = data.looted or data.count or 0
+                    if totalSamples > 0 then
+                        rate = (dropCount / totalSamples) * 100
                     end
                     table.insert(sources, {name = data.name or ("NPC " .. id), rate = rate})
                     break
