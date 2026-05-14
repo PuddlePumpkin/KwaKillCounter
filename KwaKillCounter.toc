@@ -2,4 +2,5 @@
 ## Title: KwaKillCounter
 ## SavedVariables: MyKillCountTable
 
-KwaKillCounter.lua
+KwaCore.lua
+KwaCommands.lua
