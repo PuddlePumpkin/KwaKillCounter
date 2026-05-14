@@ -101,12 +101,10 @@ local function UpdateLootValue()
                 if data.complete and not processedGUIDs[guid] then
                     processedGUIDs[guid] = true
                     local totalValue = data.totalMoney
-                    if totalValue > 0 then
-                        if entry.avgLootValue and entry.avgLootValue > 0 then
-                            entry.avgLootValue = (entry.avgLootValue + totalValue) / 2
-                        else
-                            entry.avgLootValue = totalValue
-                        end
+                    if entry.avgLootValue and entry.avgLootValue > 0 then
+                        entry.avgLootValue = (entry.avgLootValue + totalValue) / 2
+                    else
+                        entry.avgLootValue = totalValue
                     end
                 end
             end
