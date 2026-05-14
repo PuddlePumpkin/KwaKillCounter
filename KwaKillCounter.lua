@@ -8,6 +8,7 @@ frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 
 local pendingKillQueue = {}
 local processedGUIDs = {}
+local processedItemGUIDs = {}
 -- Pattern to capture: "MobName dies, you gain %d experience."
 local xpKillPattern = _G["COMBATLOG_XPGAIN_FIRSTPERSON"]:gsub("%%s", ".-"):gsub("%%d", "(%%d+)")
 
@@ -26,7 +27,7 @@ local function UpdateLootValue()
             end
         end
 
-        if guid and not processedGUIDs[guid] then
+        if guid and (not processedGUIDs[guid] or not processedItemGUIDs[guid]) then
             if not lootData[guid] then
                 lootData[guid] = { totalMoney = 0, items = {}, complete = true }
             end
@@ -70,22 +71,23 @@ local function UpdateLootValue()
                 local entry = MyKillCountTable[npcID]
                 entry.items = entry.items or {}
                 
-                -- Always update items if we found any
-                for _, newItem in ipairs(data.items) do
-                    local exists = false
-                    for _, existingItem in ipairs(entry.items) do
-                        if existingItem == newItem then
-                            exists = true
-                            break
-                        end
+                -- Always update item counts if we haven't for this GUID
+                if not processedItemGUIDs[guid] then
+                    processedItemGUIDs[guid] = true
+                    
+                    -- Use a local set to only count each unique item once per loot window
+                    local uniqueItems = {}
+                    for _, itemID in ipairs(data.items) do
+                        uniqueItems[itemID] = true
                     end
-                    if not exists then
-                        table.insert(entry.items, newItem)
+                    
+                    for itemID, _ in pairs(uniqueItems) do
+                        entry.items[itemID] = (entry.items[itemID] or 0) + 1
                     end
                 end
 
                 -- Only update average value if we have all prices for this window
-                if data.complete then
+                if data.complete and not processedGUIDs[guid] then
                     processedGUIDs[guid] = true
                     local totalValue = data.totalMoney
                     if entry.avgLootValue and entry.avgLootValue > 0 then
@@ -108,6 +110,15 @@ frame:SetScript("OnEvent", function(self, event, ...)
             -- Migration: Ensure all existing entries have proper fields
             for id, data in pairs(MyKillCountTable) do
                 if type(data) == "table" then
+                    -- Migrate items from list to map with counts
+                    if data.items and #data.items > 0 then
+                        local newItems = {}
+                        for _, item in ipairs(data.items) do
+                            newItems[tostring(item)] = 1
+                        end
+                        data.items = newItems
+                    end
+                    
                     data.items = data.items or {}
                     data.avgLootValue = data.avgLootValue or 0
                     data.xp = data.xp or 0
@@ -117,6 +128,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
     
     elseif event == "PLAYER_ENTERING_WORLD" then
         processedGUIDs = {}
+        processedItemGUIDs = {}
 
     elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
         local _, subevent, _, _, _, _, _, destGUID, destName = CombatLogGetCurrentEventInfo()
@@ -257,11 +269,11 @@ local function FindItemSource(msg)
 
     for id, data in pairs(MyKillCountTable) do
         if type(data) == "table" and data.items then
-            for _, item in ipairs(data.items) do
+            for item, dropCount in pairs(data.items) do
                 local match = false
                 if itemID then
                     -- Search by ID
-                    if item == itemID then
+                    if tostring(item) == itemID then
                         match = true
                     end
                 else
@@ -281,7 +293,11 @@ local function FindItemSource(msg)
                 end
 
                 if match then
-                    table.insert(foundSources, data.name or ("NPC " .. id))
+                    local rate = 0
+                    if data.count and data.count > 0 then
+                        rate = (dropCount / data.count) * 100
+                    end
+                    table.insert(foundSources, {name = data.name or ("NPC " .. id), rate = rate})
                     break
                 end
             end
@@ -292,8 +308,9 @@ local function FindItemSource(msg)
     print("|cffffff00Sources for:|r " .. displayItemName)
     print("----------------------------")
     if #foundSources > 0 then
-        for _, name in ipairs(foundSources) do
-            print("- " .. name)
+        table.sort(foundSources, function(a, b) return a.rate > b.rate end)
+        for _, source in ipairs(foundSources) do
+            print(string.format("- %s [%.1f%%]", source.name, source.rate))
         end
     else
         print("No recorded drops for this item yet.")
@@ -322,9 +339,13 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
     local sources = {}
     for id, data in pairs(MyKillCountTable) do
         if type(data) == "table" and data.items then
-            for _, item in ipairs(data.items) do
-                if item == itemID then
-                    table.insert(sources, data.name or ("NPC " .. id))
+            for item, dropCount in pairs(data.items) do
+                if tostring(item) == itemID then
+                    local rate = 0
+                    if data.count and data.count > 0 then
+                        rate = (dropCount / data.count) * 100
+                    end
+                    table.insert(sources, {name = data.name or ("NPC " .. id), rate = rate})
                     break
                 end
             end
@@ -332,10 +353,12 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
     end
 
     if #sources > 0 then
+        table.sort(sources, function(a, b) return a.rate > b.rate end)
         self:AddLine(" ") -- Spacer
         self:AddLine("|cffffff00Dropped by:|r")
         for i = 1, math.min(3, #sources) do
-            self:AddLine("- " .. sources[i])
+            local source = sources[i]
+            self:AddLine(string.format("- %s [%.1f%%]", source.name, source.rate))
         end
         if #sources > 3 then
             self:AddLine("...")
