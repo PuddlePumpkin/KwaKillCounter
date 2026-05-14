@@ -18,16 +18,33 @@ function()
     return ""
 end
 
--- [%c2] Average Loot Value
+-- [%c2] Average Vendor Value
 function()
-    if WeakAuras.IsOptionsOpen() then return "Avg Loot: 1s 20c" end
+    if WeakAuras.IsOptionsOpen() then return "Avg Vendor: 1s 20c" end
     local guid = UnitGUID("target")
     if not guid then return "" end
     local unitType, _, _, _, _, npcID = strsplit("-", guid)
     if unitType == "Creature" or unitType == "Vehicle" then
         local data = MyKillCountTable and MyKillCountTable[npcID]
         if data and type(data) == "table" and data.avgLootValue and data.avgLootValue > 0 then
-            return "Avg Loot: " .. GetCoinTextureString(math.floor(data.avgLootValue))
+            return "Avg Vendor: " .. GetCoinTextureString(math.floor(data.avgLootValue))
+        end
+    end
+    return ""
+end
+
+-- [%c4] Average Auction Value
+function()
+    if WeakAuras.IsOptionsOpen() then return "Avg AH: 2s 50c" end
+    local guid = UnitGUID("target")
+    if not guid then return "" end
+    local unitType, _, _, _, _, npcID = strsplit("-", guid)
+    if unitType == "Creature" or unitType == "Vehicle" then
+        if GetDynamicAuctionValue then
+            local val = GetDynamicAuctionValue(npcID)
+            if val and val > 0 then
+                return "Avg AH: " .. GetCoinTextureString(math.floor(val))
+            end
         end
     end
     return ""

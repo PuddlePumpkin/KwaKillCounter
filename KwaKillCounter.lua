@@ -45,14 +45,16 @@ local function UpdateLootValue()
                         
                         -- Record item even if price is missing (we'll just mark it incomplete for average value)
                         if itemName then
+                            local _, _, quantity = GetLootSlotInfo(i)
+                            quantity = quantity or 1
+
                             if not itemName:lower():find(" of the ") then
                                 local itemID = itemLink:match("item:(%d+)")
                                 table.insert(lootData[guid].items, itemID or itemName)
                             end
-                            
+
                             if price then
-                                local _, _, quantity = GetLootSlotInfo(i)
-                                lootData[guid].totalMoney = lootData[guid].totalMoney + (price * (quantity or 1))
+                                lootData[guid].totalMoney = lootData[guid].totalMoney + (price * quantity)
                             else
                                 lootData[guid].complete = false
                             end
@@ -97,15 +99,34 @@ local function UpdateLootValue()
                 if data.complete and not processedGUIDs[guid] then
                     processedGUIDs[guid] = true
                     local totalValue = data.totalMoney
-                    if entry.avgLootValue and entry.avgLootValue > 0 then
-                        entry.avgLootValue = (entry.avgLootValue + totalValue) / 2
-                    else
-                        entry.avgLootValue = totalValue
+                    if totalValue > 0 then
+                        if entry.avgLootValue and entry.avgLootValue > 0 then
+                            entry.avgLootValue = (entry.avgLootValue + totalValue) / 2
+                        else
+                            entry.avgLootValue = totalValue
+                        end
                     end
                 end
             end
         end
     end
+end
+
+-- Dynamic Auction Value Calculation
+function GetDynamicAuctionValue(npcID)
+    local data = MyKillCountTable and MyKillCountTable[npcID]
+    if not data or not data.items or not data.looted or data.looted == 0 then return 0 end
+
+    local totalValue = 0
+    for itemID, dropCount in pairs(data.items) do
+        local ahPrice = 0
+        if Auctionator and Auctionator.API and Auctionator.API.v1 then
+            ahPrice = Auctionator.API.v1.GetAuctionPriceByItemLink("KwaKillCounter", "item:" .. itemID) or 0
+        end
+        totalValue = totalValue + (ahPrice * dropCount)
+    end
+
+    return totalValue / data.looted
 end
 
 frame:SetScript("OnEvent", function(self, event, ...)
@@ -206,7 +227,7 @@ local function ShowTopKills()
     
     for id, data in pairs(MyKillCountTable) do
         if type(data) == "table" then
-            table.insert(tempTable, {name = data.name, count = data.count, xp = data.xp, avgLootValue = data.avgLootValue})
+            table.insert(tempTable, {name = data.name, count = data.count})
             totalKills = totalKills + (data.count or 0)
         end
     end
@@ -221,11 +242,7 @@ local function ShowTopKills()
     for i = 1, 5 do
         if tempTable[i] then
             local mob = tempTable[i]
-            local lootText = ""
-            if mob.avgLootValue and mob.avgLootValue > 0 then
-                lootText = " | Avg Loot: " .. GetCoinTextureString(math.floor(mob.avgLootValue))
-            end
-            print(i .. ". " .. mob.name .. " (" .. mob.count .. ")" .. lootText)
+            print(i .. ". " .. mob.name .. " (" .. mob.count .. ")")
         else
             if i == 1 and totalKills == 0 then print("No kills recorded yet!") end
             break
