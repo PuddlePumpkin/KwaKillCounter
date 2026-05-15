@@ -117,11 +117,15 @@ function GetDynamicAuctionValue(npcID)
 
     local totalValue = 0
     for itemID, dropCount in pairs(data.items) do
-        local ahPrice = 0
-        if Auctionator and Auctionator.API and Auctionator.API.v1 then
-            ahPrice = Auctionator.API.v1.GetAuctionPriceByItemLink("KwaKillCounter", "item:" .. itemID) or 0
+        local _, _, itemQuality = GetItemInfo(itemID)
+        -- Exclude gray items (Quality 0) as they don't sell on AH
+        if not itemQuality or itemQuality > 0 then
+            local ahPrice = 0
+            if Auctionator and Auctionator.API and Auctionator.API.v1 then
+                ahPrice = Auctionator.API.v1.GetAuctionPriceByItemLink("KwaKillCounter", "item:" .. itemID) or 0
+            end
+            totalValue = totalValue + (ahPrice * dropCount)
         end
-        totalValue = totalValue + (ahPrice * dropCount)
     end
 
     return totalValue / data.looted
