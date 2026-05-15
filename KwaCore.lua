@@ -50,10 +50,8 @@ local function UpdateLootValue()
                             local _, _, quantity = GetLootSlotInfo(i)
                             quantity = quantity or 1
 
-                            if not itemName:lower():find(" of the ") then
-                                local itemID = itemLink:match("item:(%d+)")
-                                table.insert(lootData[guid].items, itemID or itemName)
-                            end
+                            local itemID = itemLink:match("item:(%d+)")
+                            table.insert(lootData[guid].items, itemID or itemName)
 
                             if price then
                                 lootData[guid].totalMoney = lootData[guid].totalMoney + (price * quantity)
