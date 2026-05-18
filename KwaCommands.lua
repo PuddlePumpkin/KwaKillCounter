@@ -127,6 +127,83 @@ function KKK.FindItemSource(msg)
     end
 end
 
+function KKK.ShowTopVendor()
+    local tempTable = {}
+    for id, data in pairs(MyKillCountTable) do
+        if type(data) == "table" and (data.count or 0) >= 10 and data.avgLootValue and data.avgLootValue > 0 then
+            table.insert(tempTable, {name = data.name, value = data.avgLootValue})
+        end
+    end
+
+    table.sort(tempTable, function(a, b) return a.value > b.value end)
+
+    print("----------------------------")
+    print("|cff00ff00Top 10 Most Profitable (Vendor, min 10 kills):|r")
+    print("----------------------------")
+    for i = 1, 10 do
+        if tempTable[i] then
+            print(i .. ". " .. tempTable[i].name .. ": " .. GetCoinTextureString(tempTable[i].value))
+        else
+            if i == 1 then print("No loot data with at least 10 kills recorded yet!") end
+            break
+        end
+    end
+end
+
+function KKK.ShowTopAuction()
+    local tempTable = {}
+    for id, data in pairs(MyKillCountTable) do
+        if type(data) == "table" and (data.count or 0) >= 10 and data.looted and data.looted > 0 then
+            local val = KKK.GetDynamicAuctionValue(id)
+            if val > 0 then
+                table.insert(tempTable, {name = data.name, value = val})
+            end
+        end
+    end
+
+    table.sort(tempTable, function(a, b) return a.value > b.value end)
+
+    print("----------------------------")
+    print("|cff00ff00Top 10 Most Profitable (Auction, min 10 kills):|r")
+    print("----------------------------")
+    for i = 1, 10 do
+        if tempTable[i] then
+            print(i .. ". " .. tempTable[i].name .. ": " .. GetCoinTextureString(tempTable[i].value))
+        else
+            if i == 1 then print("No auction data with at least 10 kills recorded (or Auctionator not found)!") end
+            break
+        end
+    end
+end
+
+function KKK.ShowHelp()
+    print("----------------------------")
+    print("|cffffff00KwaKillCounter Commands:|r")
+    print("----------------------------")
+    print("- /kwakills: Top 5 most killed NPCs.")
+    print("- /kwaracekills: Kills categorized by race.")
+    print("- /kwafind [Item]: Search for drop sources.")
+    print("- /kwatopvendor: Top 10 most profitable (Vendor).")
+    print("- /kwatopauction: Top 10 most profitable (Auction).")
+    print("- /kwapurge: Clear loot data (keeps kill counts).")
+    print("- /kwahelp: Shows this list.")
+    print("----------------------------")
+end
+
+function KKK.PurgeData()
+    local count = 0
+    for id, data in pairs(MyKillCountTable) do
+        if type(data) == "table" then
+            data.looted = 0
+            data.items = {}
+            data.avgLootValue = 0
+            data.totalVendorValue = 0
+            count = count + 1
+        end
+    end
+    print("|cffff0000[KwaKillCounter] Purged loot and value data for " .. count .. " NPCs. (Kill counts preserved)|r")
+end
+
 SLASH_KWAKILLS1 = "/kwakills"
 SlashCmdList["KWAKILLS"] = KKK.ShowTopKills
 
@@ -135,3 +212,15 @@ SlashCmdList["KWARACEKILLS"] = KKK.ShowTopRaces
 
 SLASH_KWAFIND1 = "/kwafind"
 SlashCmdList["KWAFIND"] = KKK.FindItemSource
+
+SLASH_KWATOPVENDOR1 = "/kwatopvendor"
+SlashCmdList["KWATOPVENDOR"] = KKK.ShowTopVendor
+
+SLASH_KWATOPAUCTION1 = "/kwatopauction"
+SlashCmdList["KWATOPAUCTION"] = KKK.ShowTopAuction
+
+SLASH_KWAPURGE1 = "/kwapurge"
+SlashCmdList["KWAPURGE"] = KKK.PurgeData
+
+SLASH_KWAHELP1 = "/kwahelp"
+SlashCmdList["KWAHELP"] = KKK.ShowHelp

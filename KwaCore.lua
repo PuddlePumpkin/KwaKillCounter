@@ -98,11 +98,9 @@ local function UpdateLootValue()
                 -- Only update average value if we have all prices for this window
                 if data.complete and not processedGUIDs[guid] then
                     processedGUIDs[guid] = true
-                    local totalValue = data.totalMoney
-                    if entry.avgLootValue and entry.avgLootValue > 0 then
-                        entry.avgLootValue = (entry.avgLootValue + totalValue) / 2
-                    else
-                        entry.avgLootValue = totalValue
+                    entry.totalVendorValue = (entry.totalVendorValue or 0) + data.totalMoney
+                    if entry.looted and entry.looted > 0 then
+                        entry.avgLootValue = entry.totalVendorValue / entry.looted
                     end
                 end
             end
@@ -119,11 +117,19 @@ function GetDynamicAuctionValue(npcID)
     for itemID, dropCount in pairs(data.items) do
         local _, _, itemQuality = GetItemInfo(itemID)
         -- Exclude gray items (Quality 0) as they don't sell on AH
-        if not itemQuality or itemQuality > 0 then
+        -- Must explicitly check quality > 0 to avoid nil/not-cached issues
+        if itemQuality and itemQuality > 0 then
             local ahPrice = 0
             if Auctionator and Auctionator.API and Auctionator.API.v1 then
                 ahPrice = Auctionator.API.v1.GetAuctionPriceByItemLink("KwaKillCounter", "item:" .. itemID) or 0
             end
+
+            -- Filter: White items (Quality 1) shouldn't be counted if > 10g (100,000 copper)
+            -- This avoids outliers from common items listed at absurd prices
+            if itemQuality == 1 and ahPrice > 100000 then
+                ahPrice = 0
+            end
+
             totalValue = totalValue + (ahPrice * dropCount)
         end
     end
@@ -150,6 +156,7 @@ local function MigrateData()
             
             data.items = data.items or {}
             data.avgLootValue = data.avgLootValue or 0
+            data.totalVendorValue = data.totalVendorValue or ((data.avgLootValue or 0) * (data.looted or 0))
             data.xp = data.xp or 0
             data.looted = data.looted or 0
         end

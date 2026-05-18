@@ -14,6 +14,10 @@ Simple WoW addon for tracking NPC kills and item drop sources.
 - `/kwakills` — Displays your total kills and the top 5 most killed NPCs.
 - `/kwaracekills` — Displays your kill counts categorized by NPC race / species.
 - `/kwafind [Item Link/Name]` — Searches for NPCs that have dropped a specific item and shows their calculated drop rates.
+- `/kwatopvendor` — Displays the top 10 most profitable NPCs based on vendor value.
+- `/kwatopauction` — Displays the top 10 most profitable NPCs based on auction value (requires Auctionator).
+- `/kwapurge` — Clears all loot and value data to remove outliers (kill counts are preserved).
+- `/kwahelp` — Displays a list of all available slash commands.
 
 ## 🖱️ Tooltips
 
